@@ -2,7 +2,12 @@
 
 Zelfstandige Python-module voor het HBO-ICT-hackathonprototype. Spraakherkenning
 levert tekst aan; Streamlit toont `response` en TTS kan diezelfde tekst uitspreken.
-De module bewaart geen gesprekken en bevat geen interface, scraper of server.
+De AI-module bewaart geen gesprekken en bevat geen interface of server.
+
+De onafhankelijke scraper staat in `scraper/`. **Productie blokkeert momenteel
+`/modules/` met HTTP 401: er zijn nul minoren verzameld en de bronparser is nog
+niet geïmplementeerd.** De fetcher, validatie, CLI en rapportage zijn wel getest.
+Zie [scraper/README.md](scraper/README.md) voor onderzoek, uitvoering en beperkingen.
 
 ## Installeren en starten
 
@@ -148,8 +153,9 @@ van Gemini zelf. Loop voor de demo ook de vier scenario's met echte, actuele
 scraperdata handmatig door: ICT/ondernemen, zorg/psychologie, onbeslist en geen match.
 
 Getest met `google-genai` 1.75.0: 27 tests geslaagd, inclusief een echte
-SDK-aanroep met nagebootst HTTP-antwoord. Alleen `google-genai` is een directe
-dependency; tests gebruiken `unittest` en maken geen echte API-calls.
+SDK-aanroep met nagebootst HTTP-antwoord. De AI-module gebruikt alleen
+`google-genai` als directe dependency; `requirements.txt` bevat daarnaast de
+scraper- en testdependencies. De AI-tests gebruiken `unittest` en maken geen echte API-calls.
 De module logt uitsluitend vaste foutcodes, geen
 keys, gesprekken of exceptioninhoud. De meegegeven tekst en geschiedenis worden
 wel naar Gemini gestuurd: vraag geen onnodige persoonsgegevens en zet geen

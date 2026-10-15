@@ -1,0 +1,23 @@
+{
+  "source": "https://www.kiesopmaat.nl/modules/",
+  "scraped_at": "2026-10-15T09:08:56.214551+00:00",
+  "requested_limit": 100,
+  "status": "blocked",
+  "pages_requested": 2,
+  "pages_succeeded": 1,
+  "records_extracted": 0,
+  "records_valid": 0,
+  "duplicates_removed": 0,
+  "records_rejected": 0,
+  "errors": [
+    {
+      "code": "access_restricted",
+      "url": "https://www.kiesopmaat.nl/modules/",
+      "http_status": 401
+    }
+  ],
+  "duplicate_urls_skipped": 0,
+  "dataset_updated": false,
+  "empty_dataset_initialized": false,
+  "parser_verified_on_production": false
+}
