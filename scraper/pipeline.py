@@ -54,7 +54,7 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def run_scrape(limit: int = 100, output_dir: str | Path = "data", *, delay: float = 1.5,
-               timeout: float = 20, retries: int = 2) -> dict:
+               timeout: float = 20, retries: int = 2, max_requests: int | None = None) -> dict:
     if not 1 <= limit <= 10_000:
         raise ValueError("Limit moet tussen 1 en 10000 liggen.")
     folder = Path(output_dir)
@@ -67,8 +67,9 @@ def run_scrape(limit: int = 100, output_dir: str | Path = "data", *, delay: floa
         "dataset_updated": False, "empty_dataset_initialized": False,
         "parser_verified_on_production": False,
     }
-    fetcher = Fetcher(delay=delay, timeout=timeout, retries=retries)
+    fetcher = Fetcher(delay=delay, timeout=timeout, retries=retries, max_requests=max_requests)
     candidates: list[Minor] = []
+    seen_ids, seen_urls = set(), set()
     visited_pages, visited_details = set(), set()
 
     def error(code: str, url: str, status: int | None = None) -> None:
@@ -92,7 +93,15 @@ def run_scrape(limit: int = 100, output_dir: str | Path = "data", *, delay: floa
                     html = fetcher.get(url)
                     raw_record = parse_detail(html, url)
                     report["records_extracted"] += 1
-                    candidates.append(Minor.model_validate(raw_record))
+                    minor = Minor.model_validate(raw_record)
+                    # Dedupliceren vóór de limietcontrole: URL-aliassen mogen
+                    # het aantal bruikbare minoren niet voortijdig beperken.
+                    if minor.id in seen_ids or minor.url in seen_urls:
+                        report["duplicates_removed"] += 1
+                        continue
+                    seen_ids.add(minor.id)
+                    seen_urls.add(minor.url)
+                    candidates.append(minor)
                 except ValidationError:
                     report["records_rejected"] += 1
                     error("invalid_minor_record", url)
@@ -101,7 +110,7 @@ def run_scrape(limit: int = 100, output_dir: str | Path = "data", *, delay: floa
                     raise
                 except FetchError as exc:
                     error(exc.code, exc.url, exc.status)
-                    if exc.code in {"access_restricted", "browser_challenge"}:
+                    if exc.code in {"access_restricted", "browser_challenge", "request_budget_exhausted"}:
                         raise
                 if len(candidates) >= limit:
                     break
@@ -120,12 +129,10 @@ def run_scrape(limit: int = 100, output_dir: str | Path = "data", *, delay: floa
         report["pages_requested"] = fetcher.stats.pages_requested
         report["pages_succeeded"] = fetcher.stats.pages_succeeded
 
-    unique, duplicates = deduplicate(candidates)
-    report["duplicates_removed"] += duplicates
-    report["records_valid"] = len(unique)
+    report["records_valid"] = len(candidates)
     dataset_path = folder / "minors.json"
-    if unique:
-        _write_json(dataset_path, [minor.model_dump() for minor in unique])
+    if candidates:
+        _write_json(dataset_path, [minor.model_dump() for minor in candidates])
         report["dataset_updated"] = True
         report["status"] = "partial" if report["errors"] else "success"
     elif not dataset_path.exists():

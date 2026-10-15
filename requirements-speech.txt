@@ -1,0 +1,3 @@
+# Optionele lokale speechpackages. Dit installeert GEEN stem-/Whispermodellen.
+faster-whisper>=1.1,<2
+piper-tts>=1.3,<2

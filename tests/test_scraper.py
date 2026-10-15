@@ -267,3 +267,61 @@ def test_invalid_extracted_record_is_counted_and_partial_data_validated(monkeypa
     assert report["records_extracted"] == 2
     assert report["records_rejected"] == report["records_valid"] == 1
     assert len(load_minors(tmp_path / "minors.json")) == 1
+
+
+@pytest.mark.parametrize("next_page", [False, True])
+def test_duplicates_do_not_consume_unique_record_limit(monkeypatch, tmp_path, minor_data, next_page):
+    """De limiet geldt ook bij URL-aliassen voor unieke gevalideerde minoren."""
+    import scraper.pipeline as pipeline
+    first_url = minor_data["url"]
+    alias_url = first_url + "?ref=duplicate"
+    second_url = first_url.replace("/123/", "/456/")
+    second = {**minor_data, "id": stable_id(second_url), "url": second_url}
+    unused_url = first_url.replace("/123/", "/789/")
+    pages = [Listing([first_url, alias_url, second_url, unused_url])]
+    responses = [robots_response(), response(text="listing"), response(text="first"), response(text="duplicate")]
+    if next_page:
+        pages = [Listing([first_url, alias_url], SOURCE + "?page=2"), Listing([second_url, unused_url])]
+        responses.append(response(text="next listing"))
+    responses.append(response(text="second"))
+    get = fake_get(monkeypatch, responses)
+    parse_pages = Mock(side_effect=pages)
+    monkeypatch.setattr(pipeline, "parse_listing", parse_pages)
+    monkeypatch.setattr(pipeline, "parse_detail", Mock(side_effect=[minor_data, {**minor_data, "url": alias_url}, second]))
+
+    report = run_scrape(2, tmp_path, delay=0)
+
+    assert report["records_valid"] == 2
+    assert report["duplicates_removed"] == 1
+    assert report["records_extracted"] == 3
+    assert report["records_rejected"] == report["duplicate_urls_skipped"] == 0
+    assert report["records_extracted"] == report["records_valid"] + report["duplicates_removed"] + report["records_rejected"]
+    assert report["status"] == "success"
+    assert report["pages_requested"] == report["pages_succeeded"] == get.call_count == 5 + int(next_page)
+    assert parse_pages.call_count == 1 + int(next_page)
+    assert [row["url"] for row in load_minors(tmp_path / "minors.json")] == [first_url, second_url]
+
+
+def test_source_exhausted_before_unique_limit_reports_real_count(monkeypatch, tmp_path, minor_data):
+    import scraper.pipeline as pipeline
+    url = minor_data["url"]
+    fake_get(monkeypatch, [robots_response(), response(text="listing"), response(text="first"), response(text="duplicate")])
+    monkeypatch.setattr(pipeline, "parse_listing", Mock(return_value=Listing([url, url + "?duplicate=1"])))
+    monkeypatch.setattr(pipeline, "parse_detail", Mock(side_effect=[minor_data, minor_data]))
+
+    report = run_scrape(50, tmp_path, delay=0)
+
+    assert report["requested_limit"] == 50
+    assert report["records_valid"] == report["duplicates_removed"] == 1
+    assert report["records_extracted"] == 2
+    assert len(load_minors(tmp_path / "minors.json")) == 1
+
+
+def test_request_budget_is_enforced_before_another_http_request(monkeypatch):
+    get = fake_get(monkeypatch, [robots_response()])
+    fetcher = Fetcher(delay=0, max_requests=1)
+    fetcher.load_robots()
+    with pytest.raises(FetchError, match="request_budget_exhausted"):
+        fetcher.get(SOURCE)
+    assert get.call_count == fetcher.stats.pages_requested == 1
+    fetcher.close()

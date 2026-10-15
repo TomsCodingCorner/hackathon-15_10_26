@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Lokale modellen, tijdelijke testresultaten en audio; nooit gebruikersdata committen.
+models/
+.runtime/
+*.onnx
+*.onnx.json
+*.wav
+*.mp3
+*.webm

@@ -26,10 +26,13 @@ class FetchStats:
 
 
 class Fetcher:
-    def __init__(self, delay: float = 1.5, timeout: float = 20, retries: int = 2):
+    def __init__(self, delay: float = 1.5, timeout: float = 20, retries: int = 2, max_requests: int | None = None):
         if not math.isfinite(delay) or not math.isfinite(timeout) or delay < 0 or timeout <= 0 or not 0 <= retries <= 3:
             raise ValueError("Ongeldige delay, timeout of retries.")
         self.delay, self.timeout, self.retries = delay, timeout, retries
+        if max_requests is not None and (type(max_requests) is not int or max_requests < 1):
+            raise ValueError("Max requests moet een positief geheel getal zijn.")
+        self.max_requests = max_requests
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.stats = FetchStats()
@@ -59,6 +62,8 @@ class Fetcher:
                 raise FetchError("robots_denied_or_unavailable", url)
             response = None
             for attempt in range(self.retries + 1):
+                if self.max_requests is not None and self.stats.pages_requested >= self.max_requests:
+                    raise FetchError("request_budget_exhausted", url)
                 if self.last_request is not None:
                     time.sleep(max(0, self.delay - (time.monotonic() - self.last_request)))
                 self.last_request = time.monotonic()

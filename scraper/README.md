@@ -1,10 +1,12 @@
-# Scraperstatus: productie blokkeert toegang
+# Scraperstatus: laatste productierun geblokkeerd
 
 Onderzoek en runs uitgevoerd op **15 oktober 2026**. Er zijn **0 echte minoren**
 verzameld. `data/minors.json` bevat daarom `[]`. Dit is geen werkende minorparser:
 `parse_listing` en `parse_detail` stoppen expliciet met
 `SourceStructureUnavailable` zolang de echte productie-HTML niet is onderzocht.
 Er zijn geen minorselectoren, filters, paginaparameters of API-velden verzonnen.
+De bron is in de laatste onderhoudssessie niet opnieuw opgevraagd; de
+HTTP-status hieronder is de laatst opgeslagen waarneming.
 
 ## Wat is daadwerkelijk onderzocht?
 
@@ -55,6 +57,11 @@ voor retries; een eventuele robots crawl-delay krijgt voorrang.
 401/403/429 en browserchallenges stoppen zonder retry of alternatieve route.
 Redirects naar andere hosts, waaronder acceptatie, worden niet gevolgd.
 Een ontbrekend/onleesbaar robotsbestand leidt tot stoppen.
+
+`--limit` telt **unieke geldige minoren**. Een duplicaat, ook via een andere
+URL met dezelfde canonieke identiteit, verbruikt geen plek; de pipeline zoekt
+zo nodig op de volgende pagina verder. Bij minder werkelijk aanbod stopt de
+run met het echte aantal. Dit is met gemockte bronadapters getest.
 
 Bij blokkade eindigt de CLI met exitcode **1**, dus dit is geen geslaagde scrape.
 Exitcode 0 betekent succes; 2 betekent ongeldige configuratie of een schrijffout.
@@ -121,8 +128,12 @@ JSON-loader en compatibiliteit met het AI-invoercontract. Pipeline-paginering is
 uitsluitend met een **gemockte bronadapter** getest. Testrecords zijn synthetisch,
 worden nergens naar `data/minors.json` geschreven en zijn geen productiegegevens.
 
-Resultaat: **71 tests geslaagd** (44 scrapergevallen en 27 bestaande AI-tests),
-plus 37 geslaagde unittest-subtests. Alle tests draaien zonder echte requests.
+Laatste volledige projectcontrole na de lokale Streamlit-integratie:
+**133 tests en 37 unittest-subtests geslaagd**. Dit omvat de eerdere 74 tests en
+nieuwe controller-, lokale-provider-, speech-, diagnostiek-, UI- en integratiechecks.
+De unittests gebruiken gemockte bron-/model-/spraakresponses, geen echte bronrequests.
+Zie [het technische dossier](../docs/PROJECT_STATUS.md) voor opdrachten,
+regressiebewijs en de [volgende prioriteiten](../docs/ROADMAP.md).
 
 Niet getest of geïmplementeerd: succesvol parsen van een echte minorpagina,
 echte filters/paginering, minor/vak-classificatie en een geslaagde scrape met
@@ -134,3 +145,8 @@ door een expliciete nieuwe run bijgewerkt, nooit automatisch actueel gehouden.
 In de beperkte Codex-sandbox is de testsuite uitgevoerd met
 `python -m pytest -q --basetemp=.venv/pytest-tmp`, omdat de standaard Windows-
 tempdirectory daar niet schrijfbaar was.
+
+De Streamlit-diagnostiekknop gebruikt aanvullend een hard budget van maximaal
+12 HTTP-verzoeken (inclusief robots), maximaal 5 records en geen retries.
+De CLI-default blijft ongewijzigd. De app kan ook zonder brondata starten;
+zie [README](../README.md) en [TEST_REPORT](../docs/TEST_REPORT.md).

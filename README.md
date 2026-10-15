@@ -1,162 +1,138 @@
-# Nederlandstalige AI-minoradviseur
+# MinorAdviseur AI
 
-Zelfstandige Python-module voor het HBO-ICT-hackathonprototype. Spraakherkenning
-levert tekst aan; Streamlit toont `response` en TTS kan diezelfde tekst uitspreken.
-De AI-module bewaart geen gesprekken en bevat geen interface of server.
+Volledig lokale Streamlit Proof of Concept voor Hackathon 4: Spraakagent.
+Nederlandse tekstchat, push-to-talk, lokale Ollama, faster-whisper en Piper.
+Geen hosting, database, betaalde modelcalls of verplichte API-key.
 
-De onafhankelijke scraper staat in `scraper/`. **Productie blokkeert momenteel
-`/modules/` met HTTP 401: er zijn nul minoren verzameld en de bronparser is nog
-niet geïmplementeerd.** De fetcher, validatie, CLI en rapportage zijn wel getest.
-Zie [scraper/README.md](scraper/README.md) voor onderzoek, uitvoering en beperkingen.
+## Current Project Status
 
-## Installeren en starten
+De UI en controller werken ook met lege data of ontbrekende modellen. De echte
+minorendataset is nog leeg; de productieparser ontbreekt en de laatste vastgelegde
+Kies op Maat-run gaf HTTP 401. De volledige **live** spraakdemo is daarom nog niet
+bewezen. Modellen worden nooit automatisch gedownload.
 
-Python 3.10 of nieuwer, vanuit de repositoryroot (PowerShell):
+Zie [PROJECT_STATUS](docs/PROJECT_STATUS.md), [TEST_REPORT](docs/TEST_REPORT.md),
+[ARCHITECTURE](docs/ARCHITECTURE.md), [TECHNICAL_AUDIT](docs/TECHNICAL_AUDIT.md),
+[ROADMAP](docs/ROADMAP.md) en [requirements](docs/REQUIREMENTS_TRACEABILITY.md).
+
+## Snel starten op Windows
+
+Python 3.10+, bij voorkeur de geteste Python 3.12, vanuit de repositoryroot:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:GEMINI_API_KEY = "jouw-eigen-key"
-$env:GEMINI_MODEL = "gemini-flash-latest"
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-`.env.example` beschrijft de configuratie; `.env` wordt **niet automatisch
-ingelezen**. Laat de gezamenlijke applicatie eventuele `.env`-configuratie laden,
-of zet de variabelen zoals hierboven. Commit nooit een key. `GEMINI_API_KEY`
-gaat in deze module voor `GOOGLE_API_KEY` (fallback). `GEMINI_MODEL` is vrij
-instelbaar; het gekozen model moet JSON-schema-output ondersteunen. Zonder
-modelinstelling wordt `gemini-flash-latest` gebruikt.
+Met een geactiveerde virtuele omgeving is het startcommando `streamlit run app.py`.
+Open [de lokale app](http://127.0.0.1:8501). Alleen loopback wordt beluisterd;
+Streamlit-gebruikstelemetrie is uitgeschakeld in `.streamlit/config.toml`.
+De app bevat **Chatbot** en **Testing & Diagnostics**. Zonder data/model kun je
+navigatie en tekstinvoer proberen, fouten bekijken en de spraakonderdelen los testen.
 
-## Interface en integratie
+## Lokale modellen handmatig installeren
+
+Deze downloads worden **niet** door de app, health checks of tests gestart:
+
+| Onderdeel | Bestanden / omvang | Voorbeeldbron |
+| --- | --- | --- |
+| Ollama `qwen2.5:3b` | Circa 1,9 GB; houd daarnaast RAM beschikbaar voor inferentie. | [Ollama-modelpagina](https://ollama.com/library/qwen2.5:3b) |
+| faster-whisper `small` | Circa 486 MB, volledige CTranslate2-directory. | [Systran modelbestanden](https://huggingface.co/Systran/faster-whisper-small/tree/main) |
+| Piper Nederlands | Circa 77 MB ONNX plus JSON-configuratie. | [nl_NL-mls-medium](https://huggingface.co/rhasspy/piper-voices/tree/main/nl/nl_NL/mls/medium) |
+
+Installeer [Ollama voor Windows](https://ollama.com/download/windows). Kies daarna
+zelf wanneer je de download wilt starten:
+
+```powershell
+$env:OLLAMA_NO_CLOUD = "1"
+ollama serve # Alleen als Ollama nog niet draait; laat dit in een apart venster draaien.
+ollama pull qwen2.5:3b # Expliciete download van circa 1,9 GB.
+```
+
+`qwen2.5:3b` is de standaard. Een ander reeds geïnstalleerd **lokaal** model kan via
+`$env:OLLAMA_MODEL = "qwen2.5:1.5b-instruct"` worden geselecteerd vóór de appstart.
+Externe hosts, redirects en modelnamen met `cloud` worden geweigerd.
+
+Optionele speechpackages installeren (dit zijn nog geen modellen):
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-speech.txt
+```
+
+Download vervolgens zelf de volledige Whisper-directory (inclusief `model.bin`,
+`config.json`, `tokenizer.json`, `vocabulary.txt`) en de Nederlandse Piper-stem:
+
+```powershell
+.\.venv\Scripts\hf.exe download Systran/faster-whisper-small --local-dir models/whisper-small
+.\.venv\Scripts\python.exe -m piper.download_voices nl_NL-mls-medium --download-dir models/piper
+```
+
+De app verwacht `models/piper/nl_NL-mls-medium.onnx` én de naastgelegen
+`nl_NL-mls-medium.onnx.json`. Whisper gebruikt CPU/int8, Nederlands en
+`local_files_only=True`; Piper gebruikt CPU en controleert de Nederlandse stemcode.
+Neem WAV-audio op met de Streamlit-microfoon, maximaal 60 seconden / 8 MB.
+Ontbrekende modellen geven een foutmelding; typen blijft mogelijk. Tekstchat
+bewijst geen werkende spraakherkenning of hoorbare TTS.
+
+## Configuratie en data
+
+`config.py` bevat alle defaults; `.env.example` beschrijft de omgevingsvariabelen.
+`.env` wordt niet automatisch geladen. Ondersteund: `OLLAMA_URL`, `OLLAMA_MODEL`,
+`WHISPER_MODEL_PATH`, `PIPER_MODEL_PATH`, `MINORS_PATH`, `SCRAPE_REPORT_PATH`,
+`RUNTIME_DIR`. Standaardpaden zijn relatief aan de repository, niet aan de werkmap.
 
 ```python
-import json
-from ai.agent import chat_with_agent
+from scraper.pipeline import load_minors
+from core.controller import run_turn
+from config import Settings
 
-with open("minors.json", encoding="utf-8") as file:
-    minors = json.load(file)  # Data van jullie scraper, geen ingebouwde catalogus.
-
-# Per student/sessie beheren, bijvoorbeeld in st.session_state.
-history = []
-message = "Ik studeer HBO-ICT en ben geïnteresseerd in ondernemerschap."
-result = chat_with_agent(message, history, minors)
-
-print(result["response"])                # Naar Streamlit en/of TTS.
-print(result["recommended_minor_ids"])  # Maximaal drie genormaliseerde string-ID's.
-print(result["needs_more_info"])        # True: wacht op een volgend studentantwoord.
-
-# Pas NA de aanroep toevoegen: message mag niet dubbel in de invoer staan.
-history.extend([
-    {"role": "user", "content": message},
-    {"role": "assistant", "content": result["response"]},
-])
-# Geef bij de volgende aanroep dezelfde history en actuele minors mee.
+settings = Settings()
+minors = load_minors(settings.dataset_path)
+turn = run_turn("Ik studeer ICT en wil ondernemen", [], minors, settings)
+print(turn.result)  # response, recommended_minor_ids, needs_more_info
 ```
 
-Input: `message: str`, `history: list[{role, content}]`, `minors: list[dict]`.
-Ook een JSON-string of wrapper met één van `minors`, `results`, `data` mag als
-dataset worden meegegeven. Rollen: `user`, `assistant` (ook `model` als alias).
-Alleen eerdere berichten meesturen, maximaal 40; berichttekst maximaal 8000
-tekens. Langere gesprekken geven een gecontroleerde fout; start dan een nieuwe
-sessie. `history` en `minors` worden niet gewijzigd.
+Een minor heeft `id`, `title`, `institution`, `description`, `url`. Optionele
+`language`, `credits`, `study_format`, `location`, `period`, `requirements` zijn
+tekst of null. De loader controleert schema, unieke ID's, productie-URL's,
+stabiele URL-hash en bruikbare beschrijvingen. Lees [de scraperhandleiding](scraper/README.md)
+voor het exacte contract. Geen fictieve fallbackcatalogus in de functionele app.
 
-Output is altijd een dictionary met precies:
+De bestaande `chat_with_agent(message, history, minors)` blijft beschikbaar.
+Met `provider=OllamaProvider(...)` gebruikt die lokale AI. Zonder expliciete provider
+blijft uitsluitend voor bestaande callers/tests de legacy Gemini-route behouden;
+**de Streamlit-app roept die route nooit aan**. Zie [legacy-documentatie](docs/LEGACY_AI.md).
 
-```json
-{
-  "response": "Je praat met een AI-minoradviseur. ...",
-  "recommended_minor_ids": ["bron-id"],
-  "needs_more_info": false
-}
+## Diagnostics en tests
+
+Het dashboard toont per stap PASS / FAIL / BLOCKED / NOT_TESTED, afhankelijkheden,
+foutdetails en oplossingen. Modelvindbaarheid is alleen readiness. Live lokale
+proeven, mocks en handmatige relevantiebeoordeling worden afzonderlijk benoemd.
+Ruwe modeloutput is alleen in Diagnostics te inspecteren; ongeldige aanbevelingen
+worden nooit getoond als kaart of uitgesproken. De testworker start alleen na
+klikken, gebruikt een vaste pytest-opdracht, timeout en begrensde uitvoer.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_environment.py
+.\.venv\Scripts\python.exe scripts/check_local_ai.py
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-`needs_more_info` is alleen `true` als de student nog iets moet antwoorden.
-Bij technische fouten of doorverwijzing is het `false`, met een lege ID-lijst
-en uitleg in `response`. De functie is synchroon; houd daar rekening mee in
-de interface. De SDK heeft een HTTP-timeout van 30 seconden per verzoek;
-eventuele SDK-retries kunnen de totale wachttijd verlengen.
+In de beperkte Codex-Windows-sandbox vereisen Streamlit-sockets een uitvoering
+buiten die sandbox en een schrijfbare testmap, bijvoorbeeld
+`--basetemp=.venv/pytest-local`. Dat is een omgevingsbeperking, geen modeldownload.
 
-## Minorformaat en scraper-normalisatie
+De kleine live scraperknop vereist expliciete bevestiging van toegestane toegang,
+controleert robots, stopt op 401/403/429 en begrenst tot 5 records / 12 requests.
+De bronparser is nog onvoltooid: de knop kan geen succesvolle scrape suggereren.
 
-Dit JSON-schema beschrijft **één genormaliseerde minor**. De dataset is een
-JSON-array van deze objecten. ID's moeten uniek en stabiel zijn.
+## Privacy en grenzen
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["id", "title", "description", "institution", "url"],
-  "properties": {
-    "id": {"type": "string", "minLength": 1},
-    "title": {"type": "string", "minLength": 1},
-    "description": {"type": "string", "minLength": 1},
-    "institution": {"type": "string", "minLength": 1},
-    "url": {"type": "string", "format": "uri", "pattern": "^https?://"}
-  }
-}
-```
-
-| Canoniek veld | Ondersteunde scraperaliassen |
-| --- | --- |
-| `id` | `minor_id`, `code` |
-| `title` | `titel`, `name`, `naam` |
-| `description` | `beschrijving`, `summary` |
-| `institution` | `institution_name`, `instelling`, `aanbieder`, `hogeschool` |
-| `url` | `link`, `detail_url` |
-
-`normalize_minors` in `ai/validation.py` zet gehele numerieke ID's om naar
-strings, verwijdert HTML-tags, decodeert HTML-entiteiten en normaliseert
-witruimte in teksten. Relatieve links worden opgelost tegen
-`https://www.kiesopmaat.nl/`; alleen HTTP(S)-links zonder gebruikerscredentials
-worden geaccepteerd. Onbekende velden worden verwijderd voordat Gemini data
-ontvangt. Er worden geen ontbrekende ID's, instellingen of beschrijvingen bedacht.
-Eén ongeldige rij, conflicterende aliassen of dubbel ID wijst de hele dataset af.
-Een lege dataset geeft direct een doorverwijzing zonder API-call.
-
-Afwijkende geneste scraperobjecten moeten vooraf naar deze velden worden
-omgezet. Gebruik `normalize_minors(raw)` ook voor kaarten in de UI, zodat de
-string-ID's en getoonde brongegevens overeenkomen met de aanbevelingen. Deze
-helper geeft bij foutieve invoer een `ValidationError`; `chat_with_agent` vangt
-die af en geeft het vaste outputformaat terug.
-
-## Advies en betrouwbaarheid
-
-Gemini krijgt de Nederlandse systeemprompt, de huidige dataset en de volledige
-meegegeven geschiedenis. Het kiest `ask`, `recommend` of `refer`. Het vraagt
-gericht naar ontbrekende richting/interesse/voorkeuren; bij voldoende informatie
-hoeft niet eerst iedere voorkeur te worden uitgevraagd. Vervolgvragen stoppen
-na drie eerdere assistant-beurten, of als dezelfde vaste vraag wordt herhaald.
-Aanbevelingen blijven daarna mogelijk; anders volgt een studieadviseur.
-
-De officiële SDK gebruikt `response_mime_type="application/json"` en
-`response_json_schema`, zoals beschreven in de
-[Google Gen AI SDK-documentatie](https://googleapis.github.io/python-genai/).
-De interne JSON bevat actie, vraagcategorie en maximaal drie aanbevelingen met
-`minor_id`, `student_quote` en `description_quote`. ID's zijn ook in het schema
-beperkt tot de huidige dataset. Python valideert onafhankelijk structuur,
-unieke/bestaande ID's, aantallen en letterlijke bronfragmenten. Elke fout wijst
-het hele antwoord af; ook gedeeltelijk foutieve adviezen worden niet getoond.
-
-De uiteindelijke Nederlandse tekst wordt met vaste zinnen opgebouwd uit
-gecontroleerde studentfragmenten en minorbeschrijvingen. Titels, instellingen en
-links komen rechtstreeks uit de dataset. Vrije modeltekst met bijvoorbeeld
-verzonnen kosten of toelatingseisen wordt nooit weergegeven. De tekst benoemt
-de AI en verwijst voor toelating, kosten en actuele beschikbaarheid naar de
-aanbieder en bij twijfel naar een studieadviseur.
-
-De inhoudelijke match blijft een modelinschatting: letterlijke broncontrole
-bewijst geen semantische relevantie of actualiteit van scraperdata. De tests
-met mocks controleren het modulecontract en de afhandeling, niet de kwaliteit
-van Gemini zelf. Loop voor de demo ook de vier scenario's met echte, actuele
-scraperdata handmatig door: ICT/ondernemen, zorg/psychologie, onbeslist en geen match.
-
-Getest met `google-genai` 1.75.0: 27 tests geslaagd, inclusief een echte
-SDK-aanroep met nagebootst HTTP-antwoord. De AI-module gebruikt alleen
-`google-genai` als directe dependency; `requirements.txt` bevat daarnaast de
-scraper- en testdependencies. De AI-tests gebruiken `unittest` en maken geen echte API-calls.
-De module logt uitsluitend vaste foutcodes, geen
-keys, gesprekken of exceptioninhoud. De meegegeven tekst en geschiedenis worden
-wel naar Gemini gestuurd: vraag geen onnodige persoonsgegevens en zet geen
-HTTP-debuglogging aan in de gezamenlijke app.
+Gesprekken, transcripties, ruwe modeluitvoer en gegenereerde audio blijven alleen
+in de huidige Streamlit Session State. Herstart een gesprek of wis diagnostische
+resultaten om die te verwijderen. Geen chat-/audio-opslag op schijf, geen externe
+AI en geen logging van gespreksinhoud. Modellen en testartefacten staan buiten Git.
+De browser moet microfoontoegang toestaan. Tekst- en spraakaanroepen zijn synchroon;
+pytest draait apart op de achtergrond. Modelkwaliteit en hoorbaarheid blijven
+handmatig te beoordelen, ook als alle technische validaties slagen.
