@@ -61,7 +61,7 @@ def test_unknown_minor_is_not_visible_or_spoken(local_settings, sample_minors, l
     assert "nonexistent-id" not in turn.result["response"]
 
 
-def test_missing_model_is_local_failure_without_external_fallback(local_settings, sample_minors, local_provider):
+def test_injected_provider_failure_never_falls_back_to_a_different_provider(local_settings, sample_minors, local_provider):
     local_provider.generate.side_effect = ProviderError("model_missing")
     with patch("ai.agent.genai.Client") as cloud:
         turn = run_turn("ondernemen", [], sample_minors, local_settings, provider=local_provider)

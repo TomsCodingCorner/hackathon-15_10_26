@@ -1,10 +1,21 @@
-"""Centrale lokale configuratie; geen modeldownloads of verplichte secrets."""
+"""Centrale configuratie; .env uit de repository, omgeving heeft voorrang."""
 
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parent
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
+
+
+def load_configuration(path: Path | None = None) -> None:
+    """Geen waarden loggen; lees alleen de expliciete repository-.env."""
+    load_dotenv(path or ROOT / ".env", override=False, interpolate=False, encoding="utf-8-sig")
+
+
+load_configuration()
 
 
 def _path(name: str, default: str) -> Path:
@@ -15,8 +26,8 @@ def _path(name: str, default: str) -> Path:
 class Settings:
     dataset_path: Path = field(default_factory=lambda: _path("MINORS_PATH", "data/minors.json"))
     report_path: Path = field(default_factory=lambda: _path("SCRAPE_REPORT_PATH", "data/scrape_report.json"))
-    ollama_url: str = field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"))
-    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen2.5:3b"))
+    gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", "").strip(), repr=False, compare=False)
+    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL)
     model_timeout: float = 60
     retrieval_limit: int = 12
     whisper_path: Path = field(default_factory=lambda: _path("WHISPER_MODEL_PATH", "models/whisper-small"))

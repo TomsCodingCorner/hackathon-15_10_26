@@ -1,39 +1,41 @@
-# Requirements traceability — lokale Streamlit-opdracht
+# Requirements traceability â€” Gemini-update, 15 oktober 2026
 
-Bijgewerkt op 15 oktober 2026. Eerdere AI-/scraperinterfaces en tests zijn behouden.
-Gerealiseerde code, offline mocks en live bewijs worden expliciet onderscheiden.
+De nieuwste instructie vervangt de eerdere voorkeur voor uitsluitend lokale AI:
+de app gebruikt GEMINI_API_KEY en GEMINI_MODEL via Google Gemini.
+STT/TTS en webserver blijven lokaal. Code, mocks en live bewijs staan apart.
 
-| DoD / requirement | Implementatie en bewijs | Stand |
+| Requirement | Implementatie / bewijs | Stand |
 | --- | --- | --- |
-| 1. Streamlit start lokaal | app.py, .streamlit/config.toml; echte serverstart op 127.0.0.1:8501 en browsercontrole | Live UI-start bewezen |
-| 2. Chatbot-pagina | pages/1_Chatbot.py; AppTest, browsertekstinvoer, vaste AI-disclosure | Gerealiseerd; advies met echte data nog geblokkeerd |
-| 3. Testing & Diagnostics | pages/2_Testing_Diagnostics.py; zeven tabs, elf componenten, AppTest en browsercontrole | Gerealiseerd |
-| 4. Tekstchat via controller | core/controller.py; lokale provider, context/correcties doorgegeven, kaarten | Offline bewezen met mocks; live minoradvies niet bewezen |
-| 5. Microfoonopname | st.audio_input en expliciete verwerkknop, WAV-validatie, epoch/event-ID | Geïntegreerd; echte microfoonopname nog handmatig testen |
-| 6. Nederlandse STT | faster-whisper CPU/int8, language=nl, local_files_only; mock- en fouttests | Code gerealiseerd; model ontbreekt, live BLOCKED |
-| 7. Nederlandse TTS | PiperVoice, Nederlandse configuratie, synthesize_wav naar geheugen; mocktests | Code gerealiseerd; stem ontbreekt, live BLOCKED |
-| 8. Zichtbare historie en reset | core/session.py, Session State; volgorde, dedup en reset in unit tests/AppTest | Offline en tekstbrowserpad bewezen |
-| 9. Maximaal drie bronkaarten | Bestaande validator en renderer hergebruikt; ID's en bronquotes gecontroleerd vóór TTS | Offline bewezen; echte catalogus ontbreekt |
-| 10. Lege/ongeldige dataset | load_minors, dataset_check en gecontroleerde fallback; UI/AppTest/JSON-tests | Bewezen; lege dataset bevat geen fictieve minoren |
-| 11. Eerlijke diagnostiek | Check, Step en tijd/modus; downstream NOT_TESTED, readiness apart | Offline getest, werkelijke omgeving gecontroleerd |
-| 12. Automatische tests expliciet | core/test_service.py, vaste shell=False-opdracht, achtergrondworker, 90s-timeout/JUnit | Servicefouten/commandocontract getest; dashboardproef afzonderlijk gerapporteerd |
-| 13. Vier scenario's | core/scenarios.py; invoer, verwacht gedrag, echte uitvoer en handmatige relevantiebeoordeling | Beschikbaar; relevantie standaard NOT_TESTED |
-| 14. Modulaire structuur | UI → controller → retrieval/provider/validation → speech; scraper onafhankelijk | Gerealiseerd, geen nieuwe backend/database |
-| 15. Projectdossier | Status, audit, architectuur, roadmap, matrix en testrapport | Bijgewerkt |
-| 16. Geen betaalde externe AI nodig | App maakt alleen loopback-Ollama aan; geen providerfallback, proxy of cloudmodelnaam | Tests en lokale technische modelproef; geen externe AI-calls gedaan |
+| Streamlit start | app.py, scripts/start.ps1; serverstart op 127.0.0.1:8502, AppTest | Bewezen |
+| Chatbot en Diagnostics | Twee pagina's, Gemini-status/disclosure en zeven tabs | AppTest geslaagd |
+| OfficiÃ«le Gemini SDK | google-genai-provider, JSON-schema, timeout, client sluiten | SDK-mocks + SDK met MockTransport; technische live JSON-proef PASS |
+| Key/model configuratie | Automatische .env, omgevingsvoorrang, key verborgen | Unit-/AppTest; eigen key gevonden zonder waarde te tonen |
+| Geen Ollama nodig | App, dashboard en scripts gebruiken Gemini | Offline getest; oude adapter alleen compatibiliteit |
+| Tekstchat/context/correcties | run_turn en chat_with_agent | Offline bewezen; volledig live schema HTTP 503 |
+| Maximaal drie geldige bronkaarten | Enum-kandidaten, JSON/ID/quotevalidatie en vaste renderer | Offline bewezen; echte dataset ontbreekt |
+| Nederlandse STT | faster-whisper CPU/int8, local_files_only, language=nl | Mocks; modelbestanden gevonden, functie NOT_TESTED |
+| Nederlandse TTS | Piper, lokale Nederlandse stem, WAV-validatie | Mocks; stem ontbreekt, live BLOCKED |
+| Microfoon/historie/reset | audio_input, Session State, idempotente event-IDs | UI geÃ¯ntegreerd; tekstvolgorde/reset getest; microfoon nog live testen |
+| Lege/ongeldige data | Loader, dataset_check en gecontroleerde fallback | Unit-/AppTest; geen fictieve chatbotcatalogus |
+| Eerlijke fouten | Readiness apart; auth/model/quota/503 BLOCKED; downstream NOT_TESTED | Unit tests; 503 live waargenomen |
+| Testdashboard | Expliciete Gemini-proef, STT/TTS, scenario's, ketentrace, pytest-worker | AppTest; geen automatische API-proef bij openen |
+| Offline tests | conftest blokkeert requests/httpx-netwerk | 156 tests + 37 subtests geslaagd |
+| Scraper en echte records | Fetcher/loader/opslag behouden; parser onvoltooid | Historisch HTTP 401, 0 records; geen nieuwe scrape |
+| Privacy | Google-disclosure, key verborgen, geen permanente chat/audio | Tests voor logging/redactie; geen automatische PII-redactie |
+| Windows-installatie | start.ps1, README; bestaande .env behouden, geen modeldownloads | PS-syntax en -SkipInstall-start getest |
+| Volledige live audioketen | Controller integreert alle stappen | Mockintegratie geslaagd; echte keten NOT_TESTED |
 
-## Behouden oorspronkelijke eisen
+## Behouden contracten en gewijzigde eisen
 
-- Bestaande functie chat_with_agent behoudt response, recommended_minor_ids en
-  needs_more_info. provider= is een optionele uitbreiding; Gemini blijft legacy.
-- JSON-schema, Nederlandse prompt, bronquotes, maximaal drie geldige ID's,
-  menselijke doorverwijzing en begrensde vervolgvragen blijven getest.
-- Scraper heeft timeout/retries/robots, stabiele URL-ID's, schema en unieke limiet,
-  loader en atomaire opslag. Kleine dashboardruns krijgen ook een requestbudget.
-- Productieparsing, bronbevestigde minor/vak-classificatie en 50+ echte records
-  zijn nog NIET gerealiseerd. Oude HTTP 401 is historische evidence.
-- Geen permanente chat-/audio-opslag, geen logging van volledige gesprekken,
-  geen modellen/audio/keys/venv in Git. Geen PII-detectie of biasvrijheidsgarantie;
-  de prompt beperkt advies tot inhoudelijke interesses en vermijdt stereotypen.
+- chat_with_agent(message, history, minors) houdt response,
+  recommended_minor_ids en needs_more_info. provider= blijft optioneel.
+- Nederlandse prompt, bronquotes, beperkte vervolgvragen en menselijke
+  doorverwijzing blijven behouden. Ongeldige output geeft geen gedeeltelijk advies.
+- De eerdere eis geen externe AI / geen verplichte API-key is door de expliciete
+  Gemini-keuze vervangen. Antwoorden vereisen key, internet en quota; geen
+  kosteloosheidsgarantie.
+- Geen fictieve data in de functionele chatbot. De geÃ¯soleerde live schemaproef
+  gebruikte alleen herkenbare unit-testfixtures, zonder bestanden te wijzigen.
+- Oude Ollama-adapter en regressietests behouden; geen onderdeel van de app.
 
-De definitieve testuitslagen en grenzen staan in [TEST_REPORT](TEST_REPORT.md).
+Zie [TEST_REPORT](TEST_REPORT.md) voor uitvoeringen en beperkingen.

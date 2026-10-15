@@ -1,6 +1,6 @@
-# Legacy Gemini-interface (historische documentatie)
+# AI-modulecontract (oorspronkelijke handleiding)
 
-Deze eerdere modulehandleiding blijft als referentie behouden. De Streamlit-app gebruikt uitsluitend expliciet Ollama en heeft geen API-key nodig. De oude status- en testaantallen hieronder zijn historisch; raadpleeg PROJECT_STATUS.md en TEST_REPORT.md voor de actuele stand.
+De zelfstandige interface hieronder is behouden. De Streamlit-app gebruikt nu ook Gemini via dezelfde provider. Oudere status- en testaantallen hieronder zijn historisch; raadpleeg [PROJECT_STATUS](PROJECT_STATUS.md), [TEST_REPORT](TEST_REPORT.md) en de [README](../README.md) voor de huidige installatie en resultaten.
 
 # Nederlandstalige AI-minoradviseur
 
@@ -15,7 +15,7 @@ Zie [scraper/README.md](../scraper/README.md) voor onderzoek, uitvoering en bepe
 
 Het [technische projectdossier](PROJECT_STATUS.md) bevat de gecontroleerde
 status, [roadmap](ROADMAP.md) en [requirementsmatrix](REQUIREMENTS_TRACEABILITY.md).
-Laatste volledige controle: **74 tests en 37 subtests geslaagd**, zonder echte netwerkcalls.
+Historische modulecontrole: **74 tests en 37 subtests geslaagd**, zonder echte netwerkcalls. De actuele uitgebreide suite staat in TEST_REPORT.md.
 
 ## Installeren en starten
 
@@ -31,8 +31,8 @@ $env:GEMINI_MODEL = "gemini-flash-latest"
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-`.env.example` beschrijft de configuratie; `.env` wordt **niet automatisch
-ingelezen**. Laat de gezamenlijke applicatie eventuele `.env`-configuratie laden,
+`.env.example` beschrijft de configuratie; de repository-`.env` wordt automatisch
+ingelezen door `config.py`, waarbij bestaande omgevingsvariabelen voorrang hebben. Herstart de app na wijzigingen. De gezamenlijke applicatie kan daarnaast configuratie laden,
 of zet de variabelen zoals hierboven. Commit nooit een key. `GEMINI_API_KEY`
 gaat in deze module voor `GOOGLE_API_KEY` (fallback). `GEMINI_MODEL` is vrij
 instelbaar; het gekozen model moet JSON-schema-output ondersteunen. Zonder
@@ -162,10 +162,11 @@ met mocks controleren het modulecontract en de afhandeling, niet de kwaliteit
 van Gemini zelf. Loop voor de demo ook de vier scenario's met echte, actuele
 scraperdata handmatig door: ICT/ondernemen, zorg/psychologie, onbeslist en geen match.
 
-Getest met `google-genai` 1.75.0: 27 tests geslaagd, inclusief een echte
-SDK-aanroep met nagebootst HTTP-antwoord. De AI-module gebruikt alleen
-`google-genai` als directe dependency; `requirements.txt` bevat daarnaast de
-scraper- en testdependencies. De AI-tests gebruiken `unittest` en maken geen echte API-calls.
+Historisch getest met `google-genai` 1.75.0: 27 AI-tests geslaagd, inclusief een echte
+SDK-aanroep met nagebootst HTTP-antwoord. De actuele integratie gebruikt
+`google-genai` en `python-dotenv`; de SDK levert ook de gebruikte httpx-transportdependency.
+`requirements.txt` bevat daarnaast de UI-, scraper- en testdependencies.
+De AI-tests gebruiken `unittest` en maken geen echte API-calls.
 De module logt uitsluitend vaste foutcodes, geen
 keys, gesprekken of exceptioninhoud. De meegegeven tekst en geschiedenis worden
 wel naar Gemini gestuurd: vraag geen onnodige persoonsgegevens en zet geen

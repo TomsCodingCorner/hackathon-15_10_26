@@ -1,82 +1,80 @@
 # Architectuur
 
-## Lokale gegevensstroom
+## Gegevensstroom
 
 ```mermaid
 flowchart LR
-    UI[Streamlit Session State] --> C[Conversation controller]
     MIC[Push-to-talk WAV] --> STT[faster-whisper NL lokaal]
-    STT --> C
-    JSON[Gevalideerde minors.json] --> C
+    STT --> C[Conversation controller]
+    UI[Streamlit Session State] --> C
+    DATA[Gevalideerde minors.json] --> C
     C --> SEARCH[TF-IDF kandidaten]
-    SEARCH --> LLM[Ollama loopback JSON-schema]
-    LLM --> VAL[Bestaande ID- en bronvalidatie]
-    VAL --> R[Nederlandse vaste renderer en kaarten]
+    SEARCH --> LLM[Google Gemini API JSON-schema]
+    LLM --> VAL[ID- en bronvalidatie]
+    VAL --> R[Nederlandse renderer en kaarten]
     R --> UI
-    R --> TTS[Piper NL naar WAV in geheugen]
+    R --> TTS[Piper NL lokaal naar WAV]
     TTS --> UI
 ```
 
-`app.py` configureert en routeert via `st.navigation`; pagina's bevatten alleen
-invoer/weergave en roepen services aan. `config.py` is de centrale configuratie.
-`core/ui.py` deelt status- en uitvoerweergave om duplicatie te beperken.
+De webapp en audioverwerking zijn lokaal; tekst, historie en geselecteerde
+minorrecords worden via HTTPS aan Google Gemini verstuurd. Geen Ollama-call,
+providerfallback, eigen server voor businesslogica of database.
 
 ## Modulegrenzen
 
 | Module | Verantwoordelijkheid |
 | --- | --- |
-| core/controller.py | Valideert invoer, orkestreert audio/tekst → retrieval → agent → kaarten → TTS. Geen Streamlit-import of opslag. |
-| core/session.py | Nieuwe gesprekken en idempotent toevoegen van een beurt. Caller bewaart de dict in Session State. |
-| ai/search.py | Kleine deterministische TF-IDF-ranking; huidige input weegt zwaarder dan oudere antwoorden. Geen semantisch bewijs. |
-| ai/agent.py | Bestaande prompt, parsing, bronvalidatie en gecontroleerde renderer; injecteerbare provider en tijdelijke AgentRun-diagnostiek. |
-| ai/providers/ollama_provider.py | REST /api/tags en /api/generate. Alleen HTTP-loopback, geen redirects/proxy of downloads. |
-| speech/stt.py | WAV-validering, lokale Whisper-load met CPU/int8 en Nederlands. |
-| speech/tts.py | Nederlandse stemconfiguratie, lokale Piper-load, WAV-bytes in geheugen. |
-| core/diagnostics.py | Bestands-/omgevingchecks, werkelijke functionele evidence, historische scraperstatus en losse modelproef. |
-| core/test_service.py | Vaste pytest-commandolijst in achtergrondworker, geen shell, timeout 90s, JUnit en max. 12.000 tekens output. |
-| scraper/ | Onafhankelijke ingestion; bronparser blijft expliciet onvoltooid. |
+| app.py / pages / core/ui.py | Navigatie, invoer, weergave, zichtbare disclosure; geen modelbusinesslogica |
+| config.py | .env laden uit repositoryroot; echte omgeving heeft voorrang; Settings verbergt key in repr |
+| core/controller.py | Invoer â†’ STT â†’ retrieval â†’ agent â†’ kaarten â†’ TTS; geen Streamlit of opslag |
+| core/session.py | Caller-beheerde geschiedenis, eventdeduplicatie en reset |
+| ai/search.py | TF-IDF-shortlist, standaard twaalf kandidaten, actuele tekst zwaarder dan historie |
+| ai/agent.py | Nederlandse prompt, providerinjectie, parsing, bronvalidatie en vaste renderer |
+| ai/providers/gemini_provider.py | OfficiÃ«le google-genai Developer API, expliciete key/model/endpoint, JSON-schema, timeout, foutcodes en client sluiten |
+| speech/stt.py / tts.py | Lazy lokale modellen, Nederlands, gevalideerde WAV-bytes in geheugen |
+| core/diagnostics.py | Readiness zonder API-calls, feitelijke evidence en expliciete Gemini-proef |
+| core/test_service.py | Vaste shell=False pytest-opdracht, achtergrondworker, timeout90, JUnit, begrensde uitvoer |
+| scraper/ | Onafhankelijke ingestion/loader; productieparser nog onvoltooid |
+| scripts/start.ps1 | Venv/packages/start; optionele speechpackages; geen modeldownload of overschrijven bestaande .env |
 
-## Publieke contracten
+## Contracten
 
-`chat_with_agent(message, history, minors, *, provider=None)` houdt
-`{response, recommended_minor_ids, needs_more_info}` aan. Zonder provider blijft
-de legacy Gemini-route beschikbaar voor eerdere callers. De Streamlit-controller
-maakt uitsluitend Ollama aan. Er is geen automatische provider-fallback.
+chat_with_agent(message, history, minors, *, provider=None) geeft
+{response, recommended_minor_ids, needs_more_info}. Zonder provider wordt
+Gemini uit de configuratie gebruikt. run_turn gebruikt Settings expliciet en
+geeft TurnResult met kaarten, optionele WAV en zeven stappen:
+STT, Controller, Retrieval, LLM, Validation, TTS, Audio output.
 
-`run_turn(..., audio=None, speak=False)` retourneert een `TurnResult` met
-gecontroleerde `result`, `cards`, optionele WAV-bytes, tijdelijke `AgentRun` en
-zeven stappen: STT, Controller, Retrieval, LLM, Validation, TTS, Audio output.
-Audio output PASS bewijst een geldige WAV, niet dat een gebruiker die gehoord heeft.
+Het interne modelantwoord bevat action ask/recommend/refer, question_topic en
+maximaal drie aanbevelingen met minor_id, student_quote en description_quote.
+Het API-schema beperkt IDs tot de shortlist. Python controleert vervolgens
+onafhankelijk structuur, IDs, aantallen en letterlijke bronfragmenten.
+Vrije modeltekst wordt nooit als advies of TTS gebruikt. De vaste renderer
+vermeldt AI, bronlinks en menselijke doorverwijzing.
 
-De lokale JSON-generatie gebruikt hetzelfde interne schema als de legacy-agent:
-action ask/recommend/refer, vraagcategorie en maximaal drie aanbevelingen met
-minor_id, student_quote en description_quote. De bestaande validator controleert
-ID-lidmaatschap, unieke ID's en letterlijke bronfragmenten. Retrieval beperkt de
-kandidaten (standaard 12); de LLM kan alleen daaruit kiezen. Nul woordoverlap is
-geen bewijs van geen match; kandidaten blijven dan in bronvolgorde beschikbaar.
+De standaardmodelalias is gemini-flash-latest, overschrijfbaar met GEMINI_MODEL.
+De SDK doet Ã©Ã©n poging per aanroep; geen verborgen retrylus of modelwissel bij
+quota/auth/503. App-timeout60s, zelfstandige providerdefault30s. Alle fouten
+worden vaste codes, zonder SDK-exceptiontekst of sleutel in de uitvoer.
+GOOGLE_API_KEY blijft alleen een compatibiliteitsfallback bij zelfstandig
+GeminiProvider() gebruik; de app leest expliciet GEMINI_API_KEY.
 
-## Sessies en privacy
+## Sessies, privacy en diagnostiek
 
-Geschiedenis, audiobytes, transcripties en ruwe uitvoer worden uitsluitend in
-Streamlit Session State bewaard. Modelcaches bevatten alleen modellen, geen
-studentdata. Er worden geen audio- of chatbestanden geschreven. Permanente
-bestanden zijn configuratie, brondata en het scraperapport. Pytest gebruikt een
-tijdelijke map onder .runtime met uitsluitend synthetische testdata.
+Gesprekken, transcripties, ruwe output en audio blijven aan applicatiezijde
+alleen in Session State. Geen gesprek- of audiobestanden. Gegevens die naar
+Gemini gaan vallen daarnaast onder Google's API-voorwaarden. Modelcaches
+bevatten alleen modellen. .env, modellen en .runtime staan buiten Git.
 
-Een input-event wordt eenmaal toegevoegd. Audio krijgt een SHA-256-event-ID,
-waardoor dezelfde opname niet opnieuw wordt verwerkt bij reruns. Een nieuw gesprek
-krijgt een nieuwe epoch en leegt de geschiedenis en berichten. Ruwe modeloutput
-wordt alleen als expliciet ongevalideerde diagnostiek getoond, nooit uitgesproken.
+Audio-event-IDs en gespreksepoch voorkomen dubbele verwerking bij reruns.
+Een nieuw gesprek leegt chatstatus; de diagnostiek heeft een aparte wisknop.
+Een stap begint NOT_TESTED; alleen uitgevoerde geslaagde controles krijgen
+PASS. Bron-, model- of outputproblemen stoppen downstream uitvoering.
+Vindbare packages en modelbestanden bewijzen geen werkende generatie/spraak.
+Historische scrape-informatie is geen nieuwe broncontrole.
 
-## Diagnostiek en fouten
-
-Elke stap begint NOT_TESTED. Een werkelijk uitgevoerde geslaagde stap krijgt PASS.
-Een eerdere blokkade laat downstream stappen NOT_TESTED; ongeldige modeloutput
-stopt vóór kaarten en TTS. Model-/packagevindbaarheid is alleen readiness,
-functioneel bewijs wordt apart geregistreerd met tijd en modus. Historische
-scraperstatus wordt nooit als nieuwe broncontrole gepresenteerd.
-
-De achtergrondworker voorkomt dat pytest het UI-thread blokkeert. Normale LLM-
-en audiobeurten zijn voor dit PoC synchroon; de LLM heeft een 60s-timeout.
-Maximaal 40 historische berichten en 8000 tekens per bericht. Geen hosting,
-asynchrone scraping, database, LangChain of vectorindex.
+De pytest-worker draait apart; model- en audiobeurten zijn synchroon.
+Historie is begrensd tot veertig berichten van maximaal achtduizend tekens.
+TF-IDF en letterlijke quotes bewijzen geen inhoudelijke relevantie.
+De oude Ollama-adapter blijft alleen voor bestaande imports/tests beschikbaar.

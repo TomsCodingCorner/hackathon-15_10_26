@@ -1,13 +1,13 @@
 import json
 import subprocess
-from dataclasses import asdict
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from ai.providers import ProviderError
-from core.diagnostics import Check, component_checks, dataset_check, environment_checks, probe_local_model, small_live_scrape
+from core.diagnostics import Check, component_checks, dataset_check, environment_checks, probe_gemini, small_live_scrape
 from core.test_service import run_tests
 
 
@@ -34,22 +34,24 @@ def test_valid_dataset_is_actually_validated(local_settings, sample_minors):
     assert dataset_check(local_settings)[0].status == "PASS"
 
 
-def test_missing_packages_and_unreachable_ollama_are_honest(monkeypatch, local_settings):
+def test_missing_packages_and_gemini_key_are_honest(monkeypatch, local_settings):
     monkeypatch.setattr("core.diagnostics.package_present", lambda name: False)
-    monkeypatch.setattr("core.diagnostics.shutil.which", lambda name: None)
-    monkeypatch.setattr("core.diagnostics.OllamaProvider.models", Mock(side_effect=ProviderError("ollama_unreachable")))
-    checks = {check.name: check for check in environment_checks(local_settings)}
+    checks = {check.name: check for check in environment_checks(replace(local_settings, gemini_api_key=""))}
     assert checks["Package: piper"].status == "BLOCKED"
-    assert checks["Ollama server"].status == "BLOCKED"
-    assert checks["Ollama model"].status == "NOT_TESTED"
+    assert checks["Gemini API-key"].status == "BLOCKED"
+    assert checks["Gemini API"].status == "BLOCKED"
+    assert checks["Gemini model"].status == "NOT_TESTED"
     assert checks["Whisper modelbestanden"].status == "BLOCKED"
     assert checks["Tijdelijke schrijfrechten"].status == "PASS"
 
 
 def test_readiness_is_not_a_functional_pass(monkeypatch, local_settings):
-    monkeypatch.setattr("core.diagnostics.OllamaProvider.models", lambda self: ["qwen2.5:3b"])
+    generate = Mock(side_effect=AssertionError("Geen API-call in health check"))
+    monkeypatch.setattr("core.diagnostics.GeminiProvider.generate", generate)
     ready = {check.name: check for check in environment_checks(local_settings)}
-    assert ready["Ollama model"].status == "PASS"
+    assert ready["Gemini API-key"].status == "PASS"
+    assert ready["Gemini API"].status == "NOT_TESTED"
+    generate.assert_not_called()
     components = {row["name"]: row for row in component_checks(local_settings)}
     for component in ("AI-provider", "AI-agent", "Speech-to-Text", "Text-to-Speech", "End-to-end"):
         assert components[component]["status"] == "NOT_TESTED"
@@ -72,16 +74,16 @@ def test_small_scrape_is_bounded(local_settings, monkeypatch):
     assert run.call_args.kwargs["max_requests"] == 12
 
 
-def test_independent_local_generation_needs_no_dataset(local_settings):
-    provider = Mock(generate=Mock(return_value='{"status":"lokale_test_geslaagd"}'))
-    result = probe_local_model(local_settings, provider)
+def test_independent_gemini_generation_needs_no_dataset(local_settings):
+    provider = Mock(generate=Mock(return_value='{"status":"gemini_test_geslaagd"}'))
+    result = probe_gemini(local_settings, provider)
     assert result["status"] == "PASS"
-    assert result["mode"] == "live_local"
+    assert result["mode"] == "live_gemini"
     assert not local_settings.dataset_path.exists()
 
 
 def test_independent_generation_does_not_pass_invalid_json(local_settings):
-    result = probe_local_model(local_settings, Mock(generate=Mock(return_value="not json")))
+    result = probe_gemini(local_settings, Mock(generate=Mock(return_value="not json")))
     assert result["status"] == "FAIL"
 
 

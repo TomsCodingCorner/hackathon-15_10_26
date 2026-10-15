@@ -12,6 +12,7 @@ from core.ui import render_cards, settings_and_status
 
 st.title("MinorAdviseur AI")
 st.write("Verken welke minor bij jouw opleiding en interesses past. Je praat met AI; controleer adviezen bij de aanbieder of een studieadviseur.")
+st.caption("Tekst, gesprekscontext en geselecteerde minorbeschrijvingen gaan naar Google Gemini. Spraakherkenning en spraakuitvoer blijven lokaal. Deel geen onnodige persoonsgegevens.")
 settings, minors = settings_and_status()
 
 if "conversation" not in st.session_state:
@@ -43,7 +44,7 @@ if text or (send_audio and audio is not None):
     recorded = audio.getvalue() if send_audio and audio is not None else None
     event_id = "audio:" + hashlib.sha256(recorded).hexdigest() if recorded is not None else "text:" + uuid.uuid4().hex
     if event_id not in conversation["events"]:
-        with st.spinner("Lokaal verwerken…"):
+        with st.spinner("Bericht verwerken met Gemini…"):
             turn = run_turn(text or "", conversation["history"], minors, settings, audio=recorded, speak=speak)
         append_turn(conversation, turn, event_id)
         if recorded is not None and turn.message:

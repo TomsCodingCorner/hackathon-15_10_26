@@ -2,15 +2,14 @@
 
 import importlib.util
 import json
-import shutil
 import sys
 import tempfile
 from time import perf_counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from ai.providers import ProviderError
-from ai.providers.ollama_provider import OllamaProvider
+from ai.providers import ERROR_MESSAGES, ProviderError
+from ai.providers.gemini_provider import GeminiProvider
 from config import EMPTY_DATA_MESSAGE, Settings
 from scraper.pipeline import load_minors, run_scrape
 from speech import SpeechError
@@ -73,23 +72,20 @@ def scrape_report(settings: Settings) -> dict:
 
 def environment_checks(settings: Settings) -> list[Check]:
     checks = [Check("Python", "PASS" if sys.version_info >= (3, 10) else "FAIL", "Python >= 3.10.", sys.version.split()[0])]
-    for package in ("streamlit", "requests", "bs4", "pydantic", "pytest", "faster_whisper", "piper"):
+    for package in ("streamlit", "google.genai", "dotenv", "requests", "bs4", "pydantic", "pytest", "faster_whisper", "piper"):
         present = package_present(package)
         checks.append(Check("Package: " + package, "PASS" if present else "BLOCKED", "Packagevindbaarheid, geen functieproef.",
                             "Gevonden." if present else "Ontbreekt.", "Installeer requirements.txt of de optionele requirements-speech.txt."))
-    checks.append(Check("Ollama installatie", "PASS" if shutil.which("ollama") else "BLOCKED", "CLI op PATH.",
-                        "Gevonden." if shutil.which("ollama") else "Niet gevonden; een reeds draaiende server kan wel bereikbaar zijn.", "Installeer Ollama voor Windows."))
-    try:
-        provider = OllamaProvider(settings.ollama_url, settings.ollama_model, timeout=3)
-        models = provider.models()
-        checks.append(Check("Ollama server", "PASS", "Lokale GET /api/tags.", "Server bereikbaar; dit is geen generatieproef."))
-        available = settings.ollama_model in models
-        checks.append(Check("Ollama model", "PASS" if available else "BLOCKED", "Model staat in /api/tags.",
-                            settings.ollama_model + (" gevonden; generatie nog niet getest." if available else " ontbreekt."),
-                            "Installeer het gekozen lokale model handmatig; downloads zijn niet automatisch."))
-    except (ProviderError, ValueError):
-        checks.append(Check("Ollama server", "BLOCKED", "Lokale GET /api/tags.", "Lokale server niet bereikbaar of configuratie ongeldig.", "Start ollama serve en controleer OLLAMA_URL."))
-        checks.append(Check("Ollama model", "NOT_TESTED", "Modelinventaris.", "Servercontrole niet geslaagd.", dependencies="Ollama server"))
+    checks.append(Check("Gemini API-key", "PASS" if settings.gemini_api_key else "BLOCKED",
+                        "Alleen aanwezigheid van GEMINI_API_KEY, geen geldigheidscontrole.",
+                        "Aanwezig; waarde verborgen." if settings.gemini_api_key else "GEMINI_API_KEY ontbreekt.",
+                        "Stel GEMINI_API_KEY in via de repository-.env of een omgevingsvariabele."))
+    checks.append(Check("Gemini model", "NOT_TESTED" if settings.gemini_model else "BLOCKED",
+                        "Modelconfiguratie; beschikbaarheid nog niet via API vastgesteld.", settings.gemini_model or "GEMINI_MODEL ontbreekt.",
+                        "Gebruik de expliciete Gemini JSON-generatieproef om dit model te controleren."))
+    checks.append(Check("Gemini API", "NOT_TESTED" if settings.gemini_api_key else "BLOCKED",
+                        "Geen netwerk- of generatieaanroepen tijdens een omgevingscheck.",
+                        "Nog geen live API-test uitgevoerd.", "Start de expliciete Gemini-test op de AI-tab.", dependencies="Internet, Gemini API-key"))
     checks.append(Check("Whisper modelbestanden", "PASS" if whisper_files_present(settings.whisper_path) else "BLOCKED",
                         "model.bin, config.json en tokenizer.json; geen laadproef.", str(settings.whisper_path), "Installeer het CTranslate2-model handmatig; zet WHISPER_MODEL_PATH."))
     try:
@@ -114,8 +110,8 @@ def environment_checks(settings: Settings) -> list[Check]:
 COMPONENTS = [
     ("Scraper", "Bronophaling en productieparser.", "Toegestane productietoegang en echte parserfixtures regelen.", "Internet, bronbeleid"),
     ("Dataset", "Gevalideerde lokale minoren.", "Herstel de scraper/dataset.", "Scraper"),
-    ("AI-provider", "Lokale gestructureerde modelgeneratie.", "Start Ollama en installeer het lokale model handmatig.", "Ollama, model"),
-    ("AI-agent", "Gesprekscontext, prompt en aanbevelingen.", "Voer een lokale gesprekstest uit.", "AI-provider, Dataset"),
+    ("AI-provider", "Gestructureerde generatie via Google Gemini.", "Controleer GEMINI_API_KEY, GEMINI_MODEL, internet en quota.", "Google Gemini API"),
+    ("AI-agent", "Gesprekscontext, prompt en aanbevelingen.", "Voer een Gemini-gesprekstest uit.", "AI-provider, Dataset"),
     ("Minor Search", "TF-IDF-kandidaten zonder AI-downloads.", "Voer retrieval uit met gevalideerde data.", "Dataset"),
     ("Outputvalidatie", "Bestaande ID's en letterlijke bronfragmenten.", "Voer een gecontroleerde AI-test uit.", "AI-provider, Dataset"),
     ("Speech-to-Text", "Werkelijke Nederlandse transcriptie.", "Installeer faster-whisper en het lokale model, neem audio op.", "Whisper, WAV-input"),
@@ -143,13 +139,13 @@ def component_checks(settings: Settings, evidence: dict | None = None) -> list[d
             observed = evidence[name]
             check.status = observed["status"]
             check.detail = observed["detail"]
-            check.mode = observed.get("mode", "live_local")
+            check.mode = observed.get("mode", "live_gemini")
             check.checked_at = observed["checked_at"]
         result.append(asdict(check))
     return result
 
 
-def record_turn(evidence: dict, turn, mode: str = "live_local") -> None:
+def record_turn(evidence: dict, turn, mode: str = "live_gemini") -> None:
     mapping = {"STT": "Speech-to-Text", "Controller": "Controller", "Retrieval": "Minor Search",
                "LLM": "AI-provider", "Validation": "Outputvalidatie", "TTS": "Text-to-Speech"}
     for step in turn.steps:
@@ -177,25 +173,31 @@ def small_live_scrape(settings: Settings, permitted: bool) -> dict:
     return run_scrape(5, settings.dataset_path.parent, delay=1.5, timeout=10, retries=0, max_requests=12)
 
 
-def probe_local_model(settings: Settings, provider=None) -> dict:
-    """Losse echte JSON-generatieproef zonder studentgegevens of minorrecords."""
+def probe_gemini(settings: Settings, provider=None) -> dict:
+    """Expliciete Gemini-generatieproef zonder studentgegevens of minorrecords."""
     started = perf_counter()
-    result = {"status": "FAIL", "model": settings.ollama_model, "mode": "live_local", "checked_at": now()}
-    schema = {"type": "object", "properties": {"status": {"type": "string", "enum": ["lokale_test_geslaagd"]}},
+    result = {"status": "FAIL", "provider": "Google Gemini", "model": settings.gemini_model, "mode": "live_gemini", "checked_at": now()}
+    schema = {"type": "object", "properties": {"status": {"type": "string", "enum": ["gemini_test_geslaagd"]}},
               "required": ["status"], "additionalProperties": False}
     try:
-        local = provider or OllamaProvider(settings.ollama_url, settings.ollama_model, settings.model_timeout)
-        raw = local.generate("Technische test zonder studentgegevens. Geef uitsluitend het gevraagde JSON-object.", schema,
-                             "Je bent een lokale technische test. Volg uitsluitend het JSON-schema.")
+        selected = provider if provider is not None else GeminiProvider(settings.gemini_api_key, settings.gemini_model, settings.model_timeout, max_output_tokens=1024)
+        raw = selected.generate("Technische test zonder studentgegevens. Geef uitsluitend het gevraagde JSON-object.", schema,
+                                "Je bent een technische test. Volg uitsluitend het JSON-schema.")
         result["raw_output"] = raw[:4000]
-        if json.loads(raw) != {"status": "lokale_test_geslaagd"}:
+        if json.loads(raw) != {"status": "gemini_test_geslaagd"}:
             raise ValueError
         result["status"] = "PASS"
-        result["detail"] = "Werkelijke lokale JSON-generatie en validatie geslaagd; geen minoradvies getest."
+        result["detail"] = "Gemini JSON-generatie en validatie geslaagd; geen minoradvies getest."
     except ProviderError as exc:
-        result["status"] = "BLOCKED" if str(exc) in {"model_missing", "ollama_unreachable"} else "FAIL"
-        result["detail"] = "Lokale modelaanroep mislukt; controleer server en modelinventaris."
+        code = str(exc) if str(exc) in ERROR_MESSAGES else "api_error"
+        result["status"] = "BLOCKED" if code in {"missing_api_key", "missing_model", "gemini_auth_error", "gemini_rate_limited", "gemini_model_not_found", "gemini_unreachable", "gemini_unavailable"} else "FAIL"
+        result["error_code"] = code
+        result["detail"] = ERROR_MESSAGES[code]
     except (ValueError, TypeError, RecursionError):
-        result["detail"] = "JSON-modeloutput of lokale configuratie ongeldig."
+        result["detail"] = "JSON-modeloutput of Gemini-configuratie ongeldig."
     result["elapsed_ms"] = round((perf_counter() - started) * 1000)
     return result
+
+
+# Compatibiliteit met eerdere scripts; gebruikt voortaan uitsluitend Gemini.
+probe_local_model = probe_gemini

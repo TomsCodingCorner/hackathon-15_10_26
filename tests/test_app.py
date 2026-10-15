@@ -42,9 +42,30 @@ def test_diagnostics_page_starts_without_starting_tests(monkeypatch, tmp_path):
 def test_chat_renders_only_validated_cards_with_local_mock(monkeypatch, local_settings, sample_minors, local_provider):
     local_settings.dataset_path.write_text(json.dumps(sample_minors))
     monkeypatch.setenv("MINORS_PATH", str(local_settings.dataset_path))
-    monkeypatch.setattr("core.controller.OllamaProvider", Mock(return_value=local_provider))
+    monkeypatch.setattr("core.controller.GeminiProvider", Mock(return_value=local_provider))
     app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
     app.chat_input[0].set_value("Ik wil ondernemen").run()
     assert not app.exception
     assert app.session_state.conversation["messages"][-1]["cards"][0]["id"] == sample_minors[0]["id"]
     assert any(item.value == "TESTDATA Ondernemen" for item in app.subheader)
+
+
+def test_gemini_diagnostics_is_explicit_and_never_displays_key(monkeypatch, tmp_path):
+    dataset = tmp_path / "minors.json"
+    dataset.write_text("[]")
+    monkeypatch.setenv("MINORS_PATH", str(dataset))
+    monkeypatch.setenv("GEMINI_API_KEY", "PRIVATE-TEST-KEY-NEVER-DISPLAY")
+    monkeypatch.setenv("GEMINI_MODEL", "configured-test-model")
+    probe = Mock(return_value={"status": "PASS", "detail": "Technische proef geslaagd.",
+                               "mode": "live_gemini", "checked_at": "2026-10-15T12:00:00Z"})
+    monkeypatch.setattr("core.diagnostics.probe_gemini", probe)
+    app = AppTest.from_file(str(ROOT / "pages/2_Testing_Diagnostics.py"), default_timeout=15).run()
+    assert not app.exception
+    probe.assert_not_called()
+    next(button for button in app.button if button.label == "Test Gemini JSON-generatie").click().run()
+    assert not app.exception
+    probe.assert_called_once()
+    assert app.session_state.component_evidence["AI-provider"]["status"] == "PASS"
+    visible = str([item.value for item in app.markdown]) + str([item.value for item in app.caption])
+    assert "PRIVATE-TEST-KEY-NEVER-DISPLAY" not in visible
+    assert "Gemini API-test: PASS" in visible

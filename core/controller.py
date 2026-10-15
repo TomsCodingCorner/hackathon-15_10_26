@@ -1,12 +1,12 @@
-"""Centrale lokale gespreks- en spraakorkestratie met feitelijke stapresultaten."""
+"""Gespreksorkestratie: Gemini voor AI, lokale STT/TTS en bronvalidatie."""
 
 from dataclasses import asdict, dataclass, field
 from time import perf_counter
 from typing import Callable
 
 from ai.agent import AgentResult, AgentRun, DISCLOSURE, _history, analyze_chat
-from ai.providers import Provider
-from ai.providers.ollama_provider import OllamaProvider
+from ai.providers import ERROR_MESSAGES, Provider, ProviderError
+from ai.providers.gemini_provider import GeminiProvider
 from ai.search import rank_minors
 from ai.validation import ValidationError, normalize_minors
 from config import EMPTY_DATA_MESSAGE, Settings
@@ -75,17 +75,24 @@ def run_turn(message: str, history: list[dict], minors: object, settings: Settin
     candidates = rank_minors(message, turns, dataset, settings.retrieval_limit)
     turn.step("Retrieval", "PASS", f"{len(candidates)} kandidaatminoren gerangschikt uit {len(dataset)} bronrecords.")
     try:
-        local_provider = provider if provider is not None else OllamaProvider(settings.ollama_url, settings.ollama_model, settings.model_timeout)
-        run = analyze_chat(message, turns, candidates, provider=local_provider)
+        selected_provider = provider if provider is not None else GeminiProvider(settings.gemini_api_key, settings.gemini_model, settings.model_timeout)
+        run = analyze_chat(message, turns, candidates, provider=selected_provider)
+    except ProviderError as exc:
+        code = str(exc) if str(exc) in ERROR_MESSAGES else "invalid_provider_config"
+        turn.step("LLM", "BLOCKED", ERROR_MESSAGES[code])
+        turn.result["response"] = DISCLOSURE + "\n\n" + ERROR_MESSAGES[code] + " Je kunt ook een studieadviseur raadplegen."
+        return turn
     except Exception:
-        turn.step("LLM", "FAIL", "Lokale modelconfiguratie ongeldig.")
-        turn.result["response"] = DISCLOSURE + "\n\nControleer de lokale Ollama-configuratie in Diagnostics."
+        turn.step("LLM", "FAIL", "Gemini-configuratie ongeldig.")
+        turn.result["response"] = DISCLOSURE + "\n\nControleer de Gemini-configuratie in Diagnostics."
         return turn
     turn.agent_run, turn.result = run, run.result
     if not run.model_succeeded:
-        turn.step("LLM", "FAIL" if run.model_called else "BLOCKED", run.error or "Geen modelaanroep uitgevoerd.", run.model_ms)
+        blocked = run.error in {"missing_api_key", "missing_model", "gemini_auth_error", "gemini_model_not_found",
+                                "gemini_rate_limited", "gemini_unavailable", "gemini_unreachable"}
+        turn.step("LLM", "BLOCKED" if blocked or not run.model_called else "FAIL", ERROR_MESSAGES.get(run.error, "Geen modelaanroep uitgevoerd."), run.model_ms)
         return turn
-    turn.step("LLM", "PASS", "Lokale modelaanroep gaf een antwoord.", run.model_ms)
+    turn.step("LLM", "PASS", "Modelaanroep gaf een antwoord; standaardprovider is Google Gemini.", run.model_ms)
     if run.error or run.validated_output is None:
         turn.step("Validation", "FAIL", "Modeloutput afgewezen; geen aanbevelingen of TTS uitgevoerd.")
         return turn

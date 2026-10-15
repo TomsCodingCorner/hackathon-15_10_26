@@ -1,21 +1,18 @@
-"""Stateloze agent met gedeelde validatie en injecteerbare lokale provider."""
+"""Stateloze Gemini-agent met gedeelde validatie en injecteerbare provider."""
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from time import perf_counter
 from typing import TypedDict
 
-try:  # Legacy mag ontbreken bij een uitsluitend lokale installatie.
-    from google import genai
-    from google.genai import types
-except ImportError:
-    genai = types = None
+# Zelfde moduleobject als de provider; bestaande callers/testpatches blijven werken.
+from google import genai
 
 from .prompts import SYSTEM_PROMPT, output_schema
 from .validation import ValidationError, normalize_minors, validate_recommendations
-from .providers import Provider, ProviderError
+from .providers import ERROR_MESSAGES, Provider, ProviderError
+from .providers.gemini_provider import GeminiProvider
 
 logger = logging.getLogger(__name__)
 DISCLOSURE = "Je praat met een AI-minoradviseur."
@@ -46,10 +43,10 @@ class AgentRun:
 
 
 def chat_with_agent(message: str, history: list[dict], minors: object, *, provider: Provider | None = None) -> AgentResult:
-    """Bestaand uitvoercontract. Geef provider= mee voor volledig lokale AI.
+    """Bestaand uitvoercontract; standaard Gemini uit de omgeving.
 
-    Zonder provider blijft de oude Gemini-interface behouden. De Streamlit-app
-    gebruikt altijd expliciet Ollama en kan nooit naar Gemini terugvallen.
+    De app gebruikt de centrale Settings en injecteert een GeminiProvider.
+    provider= blijft beschikbaar voor geïsoleerde tests en eerdere callers.
     """
     return analyze_chat(message, history, minors, provider=provider).result
 
@@ -97,38 +94,23 @@ def analyze_chat(message: str, history: list[dict], minors: object, *, provider:
     if not message.strip():
         return AgentRun(_result("Spreek of typ eerst je vraag of antwoord.", needs_more_info=True))
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
-    if provider is None and not api_key:
-        return AgentRun(_result("De AI is nog niet ingesteld: GEMINI_API_KEY ontbreekt. Laat je team de omgevingsvariabele instellen. Je kunt ook een studieadviseur raadplegen."), error="missing_api_key")
+    if provider is None:
+        try:
+            provider = GeminiProvider()
+        except ProviderError as exc:
+            code = str(exc) if str(exc) in ERROR_MESSAGES else "api_error"
+            return AgentRun(_result(ERROR_MESSAGES[code] + " Vraag eventueel een studieadviseur om hulp."), error=code)
 
     payload = json.dumps({"message": message, "history": turns, "minors": dataset}, ensure_ascii=False)
     # Alleen deze grens vangt SDK-/netwerkfouten af. Log nooit exceptiontekst,
     # API-keys, prompts, brondata of gesprekken; ook geen stacktrace.
     started = perf_counter()
     try:
-        if provider is not None:
-            raw_output = provider.generate(payload, output_schema([minor["id"] for minor in dataset]), SYSTEM_PROMPT)
-        else:
-            if genai is None:
-                raise RuntimeError("legacy_dependency_missing")
-            with genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=30_000)) as client:
-                completion = client.models.generate_content(
-                    model=os.getenv("GEMINI_MODEL", "").strip() or "gemini-flash-latest",
-                    contents=payload,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_PROMPT,
-                        response_mime_type="application/json",
-                        response_json_schema=output_schema([minor["id"] for minor in dataset]),
-                        temperature=0.2,
-                        max_output_tokens=4096,
-                    ),
-                )
-                raw_output = completion.text
+        raw_output = provider.generate(payload, output_schema([minor["id"] for minor in dataset]), SYSTEM_PROMPT)
     except Exception as exc:
         logger.warning("minor_agent: api_error")
-        code = str(exc) if isinstance(exc, ProviderError) and str(exc) in {"model_missing", "ollama_timeout", "ollama_unreachable", "ollama_http_error", "ollama_invalid_response"} else "api_error"
-        failure = ("Het lokale AI-model kon geen antwoord geven. Controleer Ollama en het model in Diagnostics, of vraag een studieadviseur om hulp."
-                   if provider is not None else "De AI-dienst is tijdelijk niet bereikbaar. Probeer het later opnieuw of bespreek je vraag met een studieadviseur.")
+        code = str(exc) if isinstance(exc, ProviderError) and str(exc) in ERROR_MESSAGES else "api_error"
+        failure = ERROR_MESSAGES[code] + " Je kunt ook een studieadviseur raadplegen."
         return AgentRun(_result(failure), error=code, model_called=True, model_ms=(perf_counter() - started) * 1000)
 
     run = AgentRun(_result(""), raw_output=raw_output if isinstance(raw_output, str) else None,

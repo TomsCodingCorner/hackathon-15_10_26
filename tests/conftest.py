@@ -7,15 +7,30 @@ from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
+import httpx
+import requests
 
 from config import Settings
 from scraper.models import stable_id
 
 
+@pytest.fixture(autouse=True)
+def offline_network(monkeypatch):
+    """Alle echte HTTP-transports blokkeren; lokale AppTest-socketpairs toestaan."""
+    def denied(*args, **kwargs):
+        raise AssertionError("Een unittest mag geen echte HTTP-aanroep uitvoeren.")
+    async def async_denied(*args, **kwargs):
+        raise AssertionError("Een unittest mag geen echte HTTP-aanroep uitvoeren.")
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", denied)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_denied)
+    monkeypatch.setattr(requests.Session, "request", denied)
+
+
 @pytest.fixture
 def local_settings(tmp_path):
     return replace(Settings(), dataset_path=tmp_path / "minors.json", report_path=tmp_path / "scrape_report.json",
-                   whisper_path=tmp_path / "whisper", piper_path=tmp_path / "nl.onnx", runtime_dir=tmp_path / "runtime")
+                   whisper_path=tmp_path / "whisper", piper_path=tmp_path / "nl.onnx", runtime_dir=tmp_path / "runtime",
+                   gemini_api_key="fake-test-key", gemini_model="fake-gemini-model")
 
 
 @pytest.fixture

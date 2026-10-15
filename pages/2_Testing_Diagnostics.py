@@ -5,7 +5,7 @@ from dataclasses import asdict
 import streamlit as st
 
 from core.controller import run_turn
-from core.diagnostics import component_checks, now, probe_local_model, record_turn, scrape_report, small_live_scrape
+from core.diagnostics import component_checks, now, probe_gemini, record_turn, scrape_report, small_live_scrape
 from core.scenarios import SCENARIOS
 from core.session import append_turn, new_conversation
 from core.test_service import start_tests
@@ -15,18 +15,18 @@ from speech.stt import transcribe, validate_wav
 from speech.tts import synthesize
 
 st.title("Testing & Diagnostics")
-st.caption("PASS betekent dat de genoemde controle is uitgevoerd. Readiness, mocktests, live lokale tests en handmatige beoordeling zijn afzonderlijk bewijs.")
+st.caption("PASS betekent dat de genoemde controle is uitgevoerd. Configuratie, mocktests, live Gemini-aanroepen, lokale spraaktests en handmatige beoordeling zijn afzonderlijk bewijs.")
 settings, minors = settings_and_status()
 evidence = st.session_state.setdefault("component_evidence", {})
 st.dataframe(component_checks(settings, evidence), hide_index=True, use_container_width=True)
 tabs = st.tabs(["Omgeving", "Scraper & Data", "AI & Scenario's", "STT", "TTS", "End-to-end", "Automatische tests"])
 
 with tabs[0]:
-    st.info("Gebruik ‘Controleer lokale omgeving’ in de sidebar. Geen downloads of modelgeneratie tijdens deze controle.")
+    st.info("Gebruik ‘Controleer lokale omgeving’ in de sidebar. Deze check voert geen Gemini-aanroep of modeldownload uit; de aanwezigheid van een sleutel bewijst geen werkende API.")
     checks = st.session_state.get("environment_checks", [])
     if checks:
         st.dataframe([asdict(check) for check in checks], hide_index=True, use_container_width=True)
-    st.write("LLM:", settings.ollama_model, "•", settings.ollama_url)
+    st.write("LLM: Google Gemini •", settings.gemini_model)
     st.write("Whisper:", str(settings.whisper_path))
     st.write("Piper:", str(settings.piper_path))
 
@@ -48,17 +48,17 @@ with tabs[1]:
             st.error("Scrape kon niet worden uitgevoerd. Controleer toestemming, standaard bestandsnamen en schrijfrechten.")
 
 with tabs[2]:
-    st.subheader("Onafhankelijke lokale modelproef")
-    st.caption("Test alleen JSON-generatie met een vast technisch bericht; werkt ook zonder minorendataset.")
-    if st.button("Test lokale JSON-generatie"):
-        with st.spinner("Lokaal model testen…"):
-            st.session_state.model_probe = probe_local_model(settings)
+    st.subheader("Onafhankelijke Gemini-modelproef")
+    st.caption("Eén echte Gemini-aanroep met een vast technisch bericht, ook zonder dataset. Dit verbruikt API-quota; je key wordt niet getoond.")
+    if st.button("Test Gemini JSON-generatie"):
+        with st.spinner("Gemini testen…"):
+            st.session_state.model_probe = probe_gemini(settings)
         probe = st.session_state.model_probe
         evidence["AI-provider"] = {key: probe[key] for key in ("status", "detail", "mode", "checked_at")}
         st.rerun()
     if st.session_state.get("model_probe"):
         st.json(st.session_state.model_probe)
-    mode = st.radio("Testmethode", ["Live lokaal via Ollama", "Gemockte contracttests (geen echte AI)"], key="ai_test_mode")
+    mode = st.radio("Testmethode", ["Live via Google Gemini", "Gemockte contracttests (geen echte AI)"], key="ai_test_mode")
     if mode.startswith("Gemockte"):
         st.info("De gemockte scenario-, JSON-, onbekend-ID- en contexttests staan in de pytest-suite. Start ze expliciet op de tab Automatische tests. Er worden geen fictieve minoren aan deze chatbot toegevoegd.")
     scenario = st.selectbox("Hackathonscenario", list(SCENARIOS))
@@ -72,9 +72,9 @@ with tabs[2]:
     if "diagnostic_conversation" not in st.session_state:
         st.session_state.diagnostic_conversation = new_conversation()
     text = st.text_area("Testbericht / vervolgvraag", key="diagnostic_input")
-    if st.button("Voer lokale AI-test uit", disabled=not text.strip() or mode.startswith("Gemockte")):
+    if st.button("Voer Gemini AI-test uit", disabled=not text.strip() or mode.startswith("Gemockte")):
         history = st.session_state.diagnostic_conversation["history"]
-        with st.spinner("Lokaal model en validatie uitvoeren…"):
+        with st.spinner("Gemini en validatie uitvoeren…"):
             turn = run_turn(text, history, minors, settings)
         append_turn(st.session_state.diagnostic_conversation, turn, str(len(history)))
         st.session_state.diagnostic_turn = turn
@@ -105,14 +105,14 @@ with tabs[3]:
         except (SpeechError, OSError):
             st.session_state.stt_result = {"status": "FAIL", "error": "Transcriptie mislukt; controleer package, lokale modelbestanden en opname."}
         result = st.session_state.stt_result
-        evidence["Speech-to-Text"] = {"status": result["status"], "detail": "Afzonderlijke transcriptietest uitgevoerd.", "checked_at": now()}
+        evidence["Speech-to-Text"] = {"status": result["status"], "detail": "Afzonderlijke transcriptietest uitgevoerd.", "mode": "local_speech", "checked_at": now()}
         st.rerun()
     if st.session_state.get("stt_result"):
         st.json(st.session_state.stt_result)
 
 with tabs[4]:
     st.subheader("Nederlandse Piper-test")
-    spoken_text = st.text_area("Uit te spreken Nederlandse tekst", "Hallo, ik ben je lokale AI-minoradviseur.", key="tts_input")
+    spoken_text = st.text_area("Uit te spreken Nederlandse tekst", "Hallo, ik ben je AI-minoradviseur.", key="tts_input")
     if st.button("Genereer lokale spraak", disabled=not spoken_text.strip()):
         from time import perf_counter
         started = perf_counter()
@@ -122,7 +122,7 @@ with tabs[4]:
         except (SpeechError, OSError):
             st.session_state.tts_result = {"status": "FAIL", "error": "Synthese mislukt; controleer Piper en de Nederlandse stemconfiguratie."}
         result = st.session_state.tts_result
-        evidence["Text-to-Speech"] = {"status": result["status"], "detail": "Afzonderlijke syntheseproef uitgevoerd; hoorbaarheid zelf beoordelen.", "checked_at": now()}
+        evidence["Text-to-Speech"] = {"status": result["status"], "detail": "Afzonderlijke syntheseproef uitgevoerd; hoorbaarheid zelf beoordelen.", "mode": "local_speech", "checked_at": now()}
         st.rerun()
     if st.session_state.get("tts_result"):
         result = st.session_state.tts_result
@@ -134,7 +134,7 @@ with tabs[4]:
 with tabs[5]:
     st.subheader("Audio → STT → Controller → Retrieval → LLM → Validatie → TTS → audio")
     chain_audio = st.audio_input("Neem een vraag op voor de volledige keten", sample_rate=16000, key="chain_audio")
-    if st.button("Test audioketen lokaal", disabled=chain_audio is None):
+    if st.button("Test audioketen met Gemini", disabled=chain_audio is None):
         with st.spinner("Audioketen uitvoeren…"):
             turn = run_turn("", [], minors, settings, audio=chain_audio.getvalue(), speak=True)
         st.session_state.chain_turn = turn
